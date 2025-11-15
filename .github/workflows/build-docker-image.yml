@@ -1,48 +1,64 @@
+# 工作流名称
 name: Build and Push Docker Image
 
+# 工作流触发器
 on:
+  # 当 main 分支有 push 操作，且特定文件发生变化时触发
   push:
     branches: [ main ]
     paths:
       - 'Dockerfile'
       - 'index.js'
       - 'package.json'
+  # 当有指向 main 分支的 Pull Request 时触发 (用于构建测试)
   pull_request:
     branches: [ main ]
+  # 允许在 GitHub Actions 页面手动触发
   workflow_dispatch:
 
 jobs:
-  build:
+  build-and-push: # 作业ID，建议使用更具描述性的名称
     runs-on: ubuntu-latest
+
+    # --- 关键修改 ---
+    # 为此作业授予权限
     permissions:
-      contents: read
-      packages: write
+      contents: read      # 授予读取仓库内容的权限 (用于 actions/checkout)
+      packages: write     # 授予向 GitHub Packages (ghcr.io) 写入/推送的权限
 
     steps:
+      # 第一步：检出代码
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # 第二步：登录到 GitHub Container Registry
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          username: ${{ github.actor }}          # 使用触发工作流的用户名
+          password: ${{ secrets.GITHUB_TOKEN }}  # 使用 GitHub 自动生成的令牌
 
+      # 第三步：设置 Docker Buildx，用于多平台构建
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      # 第四步：构建并推送到 GHCR
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
           context: .
-          push: true
+          # 只有当事件不是 'pull_request' 时才推送。避免在PR上推送镜像。
+          push: ${{ github.event_name != 'pull_request' }}
           platforms: linux/amd64,linux/arm64
           tags: |
             ghcr.io/${{ github.repository_owner }}/axubo:latest
+            ghcr.io/${{ github.repository_owner }}/axubo:${{ github.sha }}
+          # 为镜像添加元数据标签
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.description=HTTP Server
             org.opencontainers.image.licenses=MIT
+          # 使用 GitHub Actions 的缓存来加速构建
           cache-from: type=gha
           cache-to: type=gha,mode=max
